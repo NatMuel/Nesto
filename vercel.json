@@ -1,11 +1,5 @@
 {
-  "buildCommand": "prisma generate && next build",
+  "buildCommand": "next build",
   "devCommand": "next dev",
-  "installCommand": "npm install",
-  "crons": [
-    {
-      "path": "/api/cron/renew-subscriptions",
-      "schedule": "0 0 * * *"
-    }
-  ]
+  "installCommand": "npm install"
 }
