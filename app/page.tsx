@@ -3,13 +3,34 @@
 import Image from "next/image";
 import AuthButton from "@/components/AuthButton";
 import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-export default function Home() {
+function HomeContent() {
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
   const errorDescription = searchParams.get("error_description");
   const redirected = searchParams.get("redirected");
 
+  return (
+    <>
+      {redirected && (
+        <div className="info" style={{ marginBottom: "1.5rem" }}>
+          Bitte melden Sie sich an, um fortzufahren.
+        </div>
+      )}
+
+      {error && (
+        <div className="error" style={{ marginBottom: "1.5rem" }}>
+          Fehler: {errorDescription || error}
+        </div>
+      )}
+
+      <AuthButton />
+    </>
+  );
+}
+
+export default function Home() {
   return (
     <div
       className="container"
@@ -42,19 +63,9 @@ export default function Home() {
           Hausverwaltung
         </p>
 
-        {redirected && (
-          <div className="info" style={{ marginBottom: "1.5rem" }}>
-            Bitte melden Sie sich an, um fortzufahren.
-          </div>
-        )}
-
-        {error && (
-          <div className="error" style={{ marginBottom: "1.5rem" }}>
-            Fehler: {errorDescription || error}
-          </div>
-        )}
-
-        <AuthButton />
+        <Suspense fallback={<AuthButton />}>
+          <HomeContent />
+        </Suspense>
       </div>
     </div>
   );
