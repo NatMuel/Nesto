@@ -294,9 +294,9 @@ export default function Settings() {
             <Image
               src="/nesto-logo.png"
               alt="Nesto Logo"
-              width={50}
-              height={50}
-              style={{ cursor: "pointer" }}
+              width={120}
+              height={60}
+              style={{ cursor: "pointer", objectFit: "contain" }}
             />
           </Link>
           <div>
