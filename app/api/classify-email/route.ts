@@ -156,9 +156,14 @@ export async function POST(request: NextRequest) {
 Verfügbare Kategorien:
 ${labelDescriptions}
 
-Wähle die passendste Kategorie für die E-Mail aus.
+Wähle die passendste Kategorie für die E-Mail aus und bewerte die Priorität basierend auf dem Inhalt.
 
-Antworte im JSON-Format mit: {"label": "gewählter Label-Name", "create_draft": true/false}
+PRIORITÄT-BEWERTUNG:
+- "Hoch": Muss sofort beantwortet werden (Notfälle, Rechtsfälle mit Fristen, dringende Schäden, Beschwerden mit Eskalation)
+- "Mittel": Sollte in den nächsten Tagen beantwortet werden (normale Anfragen, Terminvereinbarungen, reguläre Schadenmeldungen)
+- "Niedrig": Kann eine Woche warten (allgemeine Infos, nicht dringende Anfragen, Newsletter)
+
+Antworte im JSON-Format mit: {"label": "gewählter Label-Name", "create_draft": true/false, "priority": "Hoch"|"Mittel"|"Niedrig"}
 
 Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
 
@@ -184,6 +189,7 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
     );
     const selectedLabelName = classificationResult.label;
     const shouldCreateDraft = classificationResult.create_draft === true;
+    const priority = classificationResult.priority || "Mittel";
 
     // Find the selected label
     const selectedLabel = labels.find(
@@ -206,6 +212,9 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
 
     // Apply category
     await applyCategory(microsoftAccessToken, messageId, selectedLabel.name);
+
+    // Set email importance based on priority
+    await setEmailImportance(microsoftAccessToken, messageId, priority);
 
     // Create draft if needed
     let draftCreated = false;
@@ -247,6 +256,7 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
       success: true,
       category: selectedLabel.name,
       label: selectedLabel.name,
+      priority,
       draftCreated,
     });
   } catch (error: any) {
@@ -351,6 +361,32 @@ async function createReplyDraft(
         contentType: "Text",
         content: replyText,
       },
+    }),
+  });
+}
+
+async function setEmailImportance(
+  accessToken: string,
+  messageId: string,
+  priority: string
+): Promise<void> {
+  // Map German priority to Outlook importance
+  const importanceMap: Record<string, string> = {
+    Hoch: "high",
+    Mittel: "normal",
+    Niedrig: "low",
+  };
+
+  const importance = importanceMap[priority] || "normal";
+
+  await fetch(`https://graph.microsoft.com/v1.0/me/messages/${messageId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      importance,
     }),
   });
 }
