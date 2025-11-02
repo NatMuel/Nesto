@@ -7,6 +7,83 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Fetch conversation history with the sender
+async function fetchConversationHistory(
+  accessToken: string,
+  senderEmail: string,
+  currentMessageId: string
+): Promise<string> {
+  try {
+    // Extract email address from sender string (format: "Name <email@domain.com>")
+    const emailMatch = senderEmail.match(/<(.+?)>/);
+    const email = emailMatch ? emailMatch[1] : senderEmail;
+
+    // Fetch sent emails to this address
+    const sentResponse = await fetch(
+      `https://graph.microsoft.com/v1.0/me/messages?$filter=toRecipients/any(r:r/emailAddress/address eq '${email}')&$select=subject,body,sentDateTime,from,toRecipients&$orderby=sentDateTime desc&$top=5`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    // Fetch received emails from this address (excluding current one)
+    const receivedResponse = await fetch(
+      `https://graph.microsoft.com/v1.0/me/messages?$filter=from/emailAddress/address eq '${email}' and id ne '${currentMessageId}'&$select=subject,body,receivedDateTime,from&$orderby=receivedDateTime desc&$top=5`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (!sentResponse.ok || !receivedResponse.ok) {
+      console.warn("Failed to fetch conversation history");
+      return "";
+    }
+
+    const sentEmails = await sentResponse.json();
+    const receivedEmails = await receivedResponse.json();
+
+    // Combine and sort by date
+    const allEmails = [
+      ...(sentEmails.value || []).map((email: any) => ({
+        ...email,
+        type: "sent",
+        date: new Date(email.sentDateTime),
+      })),
+      ...(receivedEmails.value || []).map((email: any) => ({
+        ...email,
+        type: "received",
+        date: new Date(email.receivedDateTime),
+      })),
+    ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    if (allEmails.length === 0) {
+      return "";
+    }
+
+    // Format conversation history
+    const history = allEmails
+      .map((email) => {
+        const bodyContent =
+          email.body?.content?.replace(/<[^>]*>/g, "").substring(0, 500) || "";
+        const direction =
+          email.type === "sent" ? "Wir an Absender" : "Absender an uns";
+        return `[${direction}] ${
+          email.subject || "(Kein Betreff)"
+        }\n${bodyContent.trim()}${bodyContent.length >= 500 ? "..." : ""}\n`;
+      })
+      .join("\n---\n\n");
+
+    return `\n\n--- VORHERIGE KOMMUNIKATION MIT DIESEM ABSENDER ---\n${history}\n--- ENDE VORHERIGE KOMMUNIKATION ---\n`;
+  } catch (error) {
+    console.error("Error fetching conversation history:", error);
+    return "";
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Get Microsoft access token from Authorization header
@@ -54,6 +131,13 @@ export async function POST(request: NextRequest) {
       settings?.general_prompt ||
       "Du bist Assistenz einer Hausverwaltung. Analysiere eingehende E-Mails basierend auf den verfügbaren Kategorien und erstelle professionelle Antwortentwürfe auf Deutsch im 'Sie'-Ton.";
 
+    // Fetch conversation history with this sender
+    const conversationHistory = await fetchConversationHistory(
+      microsoftAccessToken,
+      from,
+      messageId
+    );
+
     // Build classification prompt with dynamic labels
     const labelDescriptions = labels
       .map((label) => `- **${label.name}**: ${label.description}`)
@@ -82,7 +166,7 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
         },
         {
           role: "user",
-          content: `Betreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}`,
+          content: `Betreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}${conversationHistory}`,
         },
       ],
       response_format: { type: "json_object" },
@@ -129,7 +213,7 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
           },
           {
             role: "user",
-            content: `Erstelle einen Antwortentwurf für diese E-Mail:\n\nBetreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}`,
+            content: `Erstelle einen Antwortentwurf für diese E-Mail:\n\nBetreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}${conversationHistory}`,
           },
         ],
         temperature: 0.3,
