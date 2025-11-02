@@ -18,6 +18,9 @@ async function fetchConversationHistory(
     const emailMatch = senderEmail.match(/<(.+?)>/);
     const email = emailMatch ? emailMatch[1] : senderEmail;
 
+    console.log("[History] Fetching history for:", email);
+    console.log("[History] Current message ID:", currentMessageId);
+
     // Fetch sent emails to this address
     const sentResponse = await fetch(
       `https://graph.microsoft.com/v1.0/me/messages?$filter=toRecipients/any(r:r/emailAddress/address eq '${email}')&$select=subject,body,sentDateTime,from,toRecipients&$orderby=sentDateTime desc&$top=5`,
@@ -39,12 +42,31 @@ async function fetchConversationHistory(
     );
 
     if (!sentResponse.ok || !receivedResponse.ok) {
-      console.warn("Failed to fetch conversation history");
+      console.error("[History] API call failed:", {
+        sentStatus: sentResponse.status,
+        receivedStatus: receivedResponse.status,
+        sentOk: sentResponse.ok,
+        receivedOk: receivedResponse.ok,
+      });
+      if (!sentResponse.ok) {
+        const errorText = await sentResponse.text();
+        console.error("[History] Sent emails error:", errorText);
+      }
+      if (!receivedResponse.ok) {
+        const errorText = await receivedResponse.text();
+        console.error("[History] Received emails error:", errorText);
+      }
       return "";
     }
 
     const sentEmails = await sentResponse.json();
     const receivedEmails = await receivedResponse.json();
+
+    console.log("[History] Sent emails found:", sentEmails.value?.length || 0);
+    console.log(
+      "[History] Received emails found:",
+      receivedEmails.value?.length || 0
+    );
 
     // Combine and sort by date
     const allEmails = [
@@ -61,8 +83,11 @@ async function fetchConversationHistory(
     ].sort((a, b) => a.date.getTime() - b.date.getTime());
 
     if (allEmails.length === 0) {
+      console.log("[History] No previous emails found");
       return "";
     }
+
+    console.log("[History] Total emails in history:", allEmails.length);
 
     // Format conversation history
     const history = allEmails
@@ -137,6 +162,15 @@ export async function POST(request: NextRequest) {
       from,
       messageId
     );
+
+    // DEBUG: Log conversation history
+    console.log("=== CONVERSATION HISTORY DEBUG (classify-email) ===");
+    console.log("From:", from);
+    console.log("Message ID:", messageId);
+    console.log("History length:", conversationHistory.length);
+    console.log("History preview:", conversationHistory.substring(0, 500));
+    console.log("Has history:", conversationHistory.length > 0);
+    console.log("=================================================");
 
     // Build classification prompt with dynamic labels
     const labelDescriptions = labels
