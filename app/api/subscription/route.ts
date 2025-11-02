@@ -22,7 +22,15 @@ export async function POST(request: NextRequest) {
     const { data: sessionData } = await supabase.auth.getSession();
     const accessToken = sessionData.session?.provider_token;
 
+    console.log("[Subscription] Token check:", {
+      hasSession: !!sessionData.session,
+      hasToken: !!accessToken,
+      tokenLength: accessToken?.length,
+      userId: user.id,
+    });
+
     if (!accessToken) {
+      console.error("[Subscription] No access token found in session");
       return NextResponse.json(
         {
           error:
@@ -57,6 +65,12 @@ export async function POST(request: NextRequest) {
       process.env.NEXT_PUBLIC_APP_URL || request.headers.get("origin")
     }/api/webhooks/outlook`;
 
+    console.log("[Subscription] Creating subscription:", {
+      webhookUrl,
+      appUrl: process.env.NEXT_PUBLIC_APP_URL,
+      origin: request.headers.get("origin"),
+    });
+
     const expirationDateTime = new Date();
     expirationDateTime.setHours(expirationDateTime.getHours() + 72); // Max 3 days for mail
 
@@ -81,15 +95,29 @@ export async function POST(request: NextRequest) {
     );
 
     if (!response.ok) {
-      const error = await response.json();
-      console.error("Failed to create subscription:", error);
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = errorText;
+      }
+      console.error("[Subscription] Failed to create subscription:", {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorData,
+      });
       return NextResponse.json(
-        { error: "Failed to create subscription", details: error },
+        { error: "Failed to create subscription", details: errorData },
         { status: response.status }
       );
     }
 
     const subscription = await response.json();
+    console.log("[Subscription] Created successfully:", {
+      id: subscription.id,
+      expiry: subscription.expirationDateTime,
+    });
 
     // Save subscription info to database along with current access token
     const { error: updateError } = await supabase
@@ -106,7 +134,9 @@ export async function POST(request: NextRequest) {
       .eq("user_id", user.id);
 
     if (updateError) {
-      console.error("Failed to save subscription to database:", updateError);
+      console.error("[Subscription] Failed to save to database:", updateError);
+    } else {
+      console.log("[Subscription] Saved to database for user:", user.id);
     }
 
     return NextResponse.json({
@@ -115,7 +145,11 @@ export async function POST(request: NextRequest) {
       status: "created",
     });
   } catch (error: any) {
-    console.error("Subscription creation error:", error);
+    console.error("[Subscription] Creation error:", {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    });
     return NextResponse.json(
       { error: "Failed to create subscription", details: error.message },
       { status: 500 }

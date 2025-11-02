@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
 
     // Step 1: Handle validation request
     if (validationToken) {
+      console.log("[Webhook] Validation request received");
       return new NextResponse(validationToken, {
         status: 200,
         headers: { "Content-Type": "text/plain" },
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const notifications = body.value || [];
 
-    console.log(`Received ${notifications.length} notifications`);
+    console.log(`[Webhook] Received ${notifications.length} notifications`);
 
     // Process each notification
     for (const notification of notifications) {
@@ -46,21 +47,23 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (settingsError || !settings) {
-        console.log(
-          `No user found for subscription ${subscriptionId}`,
+        console.error(
+          `[Webhook] No user found for subscription ${subscriptionId}`,
           settingsError
         );
         continue;
       }
 
-      console.log(`Processing notification for user ${settings.user_id}`);
+      console.log(`[Webhook] Processing notification for user ${settings.user_id}`);
 
       // Get message details
       const messageId = resourceData?.id;
       if (!messageId) {
-        console.log("No message ID in notification");
+        console.error("[Webhook] No message ID in notification");
         continue;
       }
+
+      console.log(`[Webhook] Fetching email ${messageId}`);
 
       // Fetch full email details
       const emailResponse = await fetch(
@@ -73,7 +76,11 @@ export async function POST(request: NextRequest) {
       );
 
       if (!emailResponse.ok) {
-        console.error("Failed to fetch email details");
+        const errorText = await emailResponse.text();
+        console.error("[Webhook] Failed to fetch email details:", {
+          status: emailResponse.status,
+          error: errorText,
+        });
         continue;
       }
 
@@ -81,7 +88,7 @@ export async function POST(request: NextRequest) {
 
       // Skip if already categorized
       if (email.categories && email.categories.length > 0) {
-        console.log(`Email ${messageId} already categorized, skipping`);
+        console.log(`[Webhook] Email ${messageId} already categorized, skipping`);
         continue;
       }
 
@@ -93,9 +100,11 @@ export async function POST(request: NextRequest) {
         .order("display_order", { ascending: true });
 
       if (!labels || labels.length === 0) {
-        console.log("No labels configured for user");
+        console.error("[Webhook] No labels configured for user");
         continue;
       }
+
+      console.log(`[Webhook] Processing with ${labels.length} labels`);
 
       // Classify the email
       await classifyEmail(
@@ -215,10 +224,13 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
     }
 
     console.log(
-      `Successfully classified email ${messageId} as ${selectedLabel.name}`
+      `[Webhook] Successfully classified email ${messageId} as ${selectedLabel.name}`
     );
-  } catch (error) {
-    console.error("Error classifying email:", error);
+  } catch (error: any) {
+    console.error("[Webhook] Error classifying email:", {
+      message: error.message,
+      stack: error.stack,
+    });
   }
 }
 
