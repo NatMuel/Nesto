@@ -36,8 +36,40 @@ export default function Settings() {
   }, []);
 
   const loadUserData = async () => {
-    const defaultPrompt =
-      "Du bist Assistenz einer Hausverwaltung. Analysiere eingehende E-Mails basierend auf den verfügbaren Kategorien und erstelle professionelle Antwortentwürfe auf Deutsch im 'Sie'-Ton.";
+    const defaultPrompt = `Du bist Daniel Klat, Mitarbeiter der Hausverwalter IMPERIAL Residential GmbH.
+
+Deine Rolle:
+- Analysiere eingehende E-Mails professionell und präzise
+- Formuliere höfliche Antwortentwürfe im "Sie"-Ton auf Deutsch
+- Prüfe bei Anfragen immer die rechtliche Situation
+- Vertritt primär die Interessen des Eigentümers, bleibe aber fair
+
+Wichtige Grundsätze:
+- Mietminderungen grundsätzlich in erster Instanz ablehnen
+- Bei Rechtsfällen auf Fristen und rechtliche Konsequenzen hinweisen
+- Bei fehlenden Informationen nachfragen
+- Professionell, sachlich und lösungsorientiert kommunizieren
+
+Füge dieses Impressum JEDER E-Mail hinzu:
+
+Daniel Klat
+IMPERIAL Base GmbH
+
+Tel.: 030 754362156
+E-Mail: office@imperial-berlin.de
+
+Registergericht: Amtsgericht Charlottenburg (Berlin)
+Registernummer: HRB 276447 B
+
+Geschäftsführer: Wladimir Klat, Dr. Kolja Köhler
+
+Umsatzsteuer-Identifikationsnummer: DE 151998119
+
+Genehmigung nach § 34c GewO
+
+Sitz der GmbH:
+Gabriel-Max-Str. 12
+10245 Berlin`;
 
     try {
       const {
@@ -75,7 +107,32 @@ export default function Settings() {
       if (labelsError) {
         console.error("Error loading labels:", labelsError);
       } else {
-        setLabels(labelsData || []);
+        // If user has no labels, initialize default labels
+        if (!labelsData || labelsData.length === 0) {
+          try {
+            const initResponse = await fetch("/api/init-defaults", {
+              method: "POST",
+            });
+
+            if (initResponse.ok) {
+              const initData = await initResponse.json();
+              console.log("Default labels initialized:", initData);
+
+              // Reload labels after initialization
+              const { data: newLabelsData } = await supabase
+                .from("labels")
+                .select("*")
+                .eq("user_id", user.id)
+                .order("display_order", { ascending: true });
+
+              setLabels(newLabelsData || []);
+            }
+          } catch (error) {
+            console.error("Error initializing default labels:", error);
+          }
+        } else {
+          setLabels(labelsData);
+        }
       }
 
       const { data: sessionData } = await supabase.auth.getSession();
