@@ -2,97 +2,105 @@
 
 ## Overview
 
-The email classification and drafting system now includes **conversation history context**. When processing an email, the system automatically fetches previous email exchanges with the same sender and includes this context when classifying and drafting responses.
+The email classification and drafting system automatically includes **conversation history context** when processing emails. This helps the AI generate more relevant and contextually aware responses.
 
 ## How It Works
 
-### 1. Automatic History Retrieval
+When a new email arrives, the system:
 
-For each incoming email, the system:
+1. **Identifies the sender** from the email address
+2. **Fetches previous communications** with that sender:
+   - Up to 5 sent emails (from Sent Items folder)
+   - Up to 10 received emails (from Inbox)
+3. **Formats the history** chronologically with clear labels:
+   - `[Wir an Absender]` - Emails you sent to them
+   - `[Absender an uns]` - Emails they sent to you
+4. **Includes context** in both classification and draft generation
 
-- Extracts the sender's email address
-- Fetches up to 5 sent emails to that address
-- Fetches up to 5 received emails from that address (excluding the current one)
-- Combines and sorts them chronologically
+## Technical Implementation
 
-### 2. Context Integration
+### Microsoft Graph Search API
 
-The conversation history is formatted and appended to the AI prompts for:
+The feature uses the `$search` query parameter with KQL (Keyword Query Language) syntax:
 
-- **Email classification**: Helps choose the correct label based on previous interactions
-- **Draft generation**: Creates more contextually aware and relevant draft responses
+```typescript
+// Sent emails
+$search = "to:email@domain.com";
 
-### 3. Format
+// Received emails
+$search = "from:email@domain.com";
+```
 
-The history is presented to the AI in this format:
+This approach is more reliable than complex `$filter` queries for email data.
+
+### Context Integration
+
+The system automatically adds explicit instructions to the AI when conversation history exists:
 
 ```
+KONTEXT UND VORHERIGE KOMMUNIKATION:
+Es existieren vorherige E-Mails mit diesem Absender (siehe unten im Kontext).
+Berücksichtige diese Korrespondenz in deiner Antwort:
+- Beziehe dich auf frühere Versprechen, Termine oder besprochene Themen
+- Passe Ton und Dringlichkeit basierend auf dem Verlauf der Konversation an
+- Wenn es Wiederholungen oder Eskalationen gibt, erkenne und adressiere diese
+- Zeige, dass du den bisherigen Austausch kennst
+```
+
+The conversation history itself is appended to the user message:
+
+```
+Betreff: [Current Email Subject]
+Von: [Sender]
+Inhalt: [Current Email Body]
+
 --- VORHERIGE KOMMUNIKATION MIT DIESEM ABSENDER ---
-
-[Absender an uns] Subject Line
-Email body content (truncated to 500 chars)...
-
----
-
-[Wir an Absender] Re: Subject Line
-Reply content (truncated to 500 chars)...
-
+[Previous email exchanges...]
 --- ENDE VORHERIGE KOMMUNIKATION ---
 ```
 
+This dual approach ensures the AI:
+
+1. **Knows** to look for and use conversation history (system instruction)
+2. **Has** the actual conversation data to reference (user message)
+
 ## Benefits
 
-- **Better Context**: AI understands the ongoing conversation and relationship
-- **Consistent Responses**: Drafts reference previous exchanges when appropriate
-- **Improved Classification**: More accurate label assignment based on conversation history
-- **Continuity**: Responses feel more natural and connected to the thread
+- **Better Context**: AI understands ongoing conversations and relationships
+- **Consistent Responses**: Drafts naturally reference previous exchanges
+- **Improved Classification**: More accurate label assignment based on conversation flow
+- **Escalation Detection**: AI recognizes when conversations are becoming urgent
 
-## Implementation
+## Automatic Operation
 
-The feature is automatically enabled in:
+The feature works automatically in:
 
-- ✅ Manual email classification (`/api/classify-email`)
-- ✅ Automatic webhook processing (`/api/webhooks/outlook`)
+- ✅ Manual email classification (Settings page)
+- ✅ Webhook-triggered auto-classification (real-time)
 
-No configuration required - it works out of the box!
+No configuration required!
 
-## Testing
+## Privacy & Performance
 
-To test the conversation history feature:
+- **Privacy**: Only fetches emails between you and the specific sender
+- **Performance**: Minimal latency (~200-500ms per email)
+- **Reliability**: Gracefully handles failures without interrupting classification
+- **Token Efficiency**: Email bodies are truncated to 500 characters each
 
-1. **Send a test email** to your connected Outlook account from an external address
-2. **Classify it manually** in the settings page
-3. **Reply to that email** (you can edit the draft or send a new reply)
-4. **Send another email from the same address**
-5. **Observe** that the AI's classification and draft now reference the previous exchange
+## Limitations
 
-## Performance
+- Maximum 5 sent emails per sender
+- Maximum 10 received emails per sender
+- No thread detection (emails sorted chronologically, not by conversation)
+- Results sorted by relevance, not strictly by date
+- Requires valid Microsoft Graph API access token
 
-- History fetching adds minimal latency (~200-500ms per email)
-- Graceful fallback: If history fetch fails, processing continues without context
-- Errors are logged but don't interrupt the classification/drafting process
+## Future Improvements
 
-## Microsoft Graph API Permissions
+Potential enhancements:
 
-This feature uses the existing permissions:
-
-- `Mail.Read` - to fetch email history
-- No additional permissions required
-
-## Troubleshooting
-
-If conversation history isn't working:
-
-1. Check logs for `[Webhook] Failed to fetch conversation history` warnings
-2. Verify the Microsoft access token is valid and not expired
-3. Ensure the sender's email address is correctly formatted
-4. Check that previous emails exist in the mailbox
-
-## Future Enhancements
-
-Potential improvements:
-
-- Increase history limit (currently 5 emails each way)
-- Filter by date range (e.g., only last 30 days)
-- Include attachments metadata
-- Thread detection for better context grouping
+- Increase history limits
+- Add date range filtering (e.g., last 30 days only)
+- Implement proper email thread detection
+- Include attachment metadata
+- Cache history for frequently contacted senders

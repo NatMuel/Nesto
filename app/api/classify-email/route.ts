@@ -18,9 +18,6 @@ async function fetchConversationHistory(
     const emailMatch = senderEmail.match(/<(.+?)>/);
     const email = emailMatch ? emailMatch[1] : senderEmail;
 
-    console.log("[History] Fetching history for:", email);
-    console.log("[History] Current message ID:", currentMessageId);
-
     // Fetch sent emails using $search (more reliable than complex filters)
     // Note: $search doesn't support $orderby - results are sorted by relevance
     const sentResponse = await fetch(
@@ -43,40 +40,16 @@ async function fetchConversationHistory(
     );
 
     if (!sentResponse.ok || !receivedResponse.ok) {
-      console.error("[History] API call failed:", {
-        sentStatus: sentResponse.status,
-        receivedStatus: receivedResponse.status,
-        sentOk: sentResponse.ok,
-        receivedOk: receivedResponse.ok,
-      });
-      if (!sentResponse.ok) {
-        const errorText = await sentResponse.text();
-        console.error("[History] Sent emails error:", errorText);
-      }
-      if (!receivedResponse.ok) {
-        const errorText = await receivedResponse.text();
-        console.error("[History] Received emails error:", errorText);
-      }
+      console.warn("Failed to fetch conversation history");
       return "";
     }
 
     const sentEmails = await sentResponse.json();
     const receivedEmails = await receivedResponse.json();
 
-    console.log("[History] Sent emails found:", sentEmails.value?.length || 0);
-    console.log(
-      "[History] Received emails found (before filter):",
-      receivedEmails.value?.length || 0
-    );
-
     // Filter out the current message from received emails
     const filteredReceivedEmails = (receivedEmails.value || []).filter(
       (email: any) => email.id !== currentMessageId
-    );
-
-    console.log(
-      "[History] Received emails found (after filter):",
-      filteredReceivedEmails.length
     );
 
     // Combine and sort by date
@@ -94,11 +67,8 @@ async function fetchConversationHistory(
     ].sort((a, b) => a.date.getTime() - b.date.getTime());
 
     if (allEmails.length === 0) {
-      console.log("[History] No previous emails found");
       return "";
     }
-
-    console.log("[History] Total emails in history:", allEmails.length);
 
     // Format conversation history
     const history = allEmails
@@ -174,15 +144,6 @@ export async function POST(request: NextRequest) {
       messageId
     );
 
-    // DEBUG: Log conversation history
-    console.log("=== CONVERSATION HISTORY DEBUG (classify-email) ===");
-    console.log("From:", from);
-    console.log("Message ID:", messageId);
-    console.log("History length:", conversationHistory.length);
-    console.log("History preview:", conversationHistory.substring(0, 500));
-    console.log("Has history:", conversationHistory.length > 0);
-    console.log("=================================================");
-
     // Build classification prompt with dynamic labels
     const labelDescriptions = labels
       .map((label) => `- **${label.name}**: ${label.description}`)
@@ -249,12 +210,17 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
     // Create draft if needed
     let draftCreated = false;
     if (shouldCreateDraft && selectedLabel.draft_prompt) {
+      // Build system prompt with conversation history awareness
+      const contextInstruction = conversationHistory
+        ? `\n\nKONTEXT UND VORHERIGE KOMMUNIKATION:\nEs existieren vorherige E-Mails mit diesem Absender (siehe unten im Kontext). Berücksichtige diese Korrespondenz in deiner Antwort:\n- Beziehe dich auf frühere Versprechen, Termine oder besprochene Themen\n- Passe Ton und Dringlichkeit basierend auf dem Verlauf der Konversation an\n- Wenn es Wiederholungen oder Eskalationen gibt, erkenne und adressiere diese\n- Zeige, dass du den bisherigen Austausch kennst`
+        : "";
+
       const draftCompletion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: `${generalPrompt}\n\n${selectedLabel.draft_prompt}\n\nWICHTIG: Gebe NUR den E-Mail-Text zurück, OHNE Klassifizierung, Betreff oder zusätzliche Formatierung. Keine Markdown-Formatierung verwenden. Nur der reine Text der E-Mail-Antwort.`,
+            content: `${generalPrompt}${contextInstruction}\n\n${selectedLabel.draft_prompt}\n\nWICHTIG: Gebe NUR den E-Mail-Text zurück, OHNE Klassifizierung, Betreff oder zusätzliche Formatierung. Keine Markdown-Formatierung verwenden. Nur der reine Text der E-Mail-Antwort.`,
           },
           {
             role: "user",
