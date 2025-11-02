@@ -21,9 +21,9 @@ async function fetchConversationHistory(
     console.log("[History] Fetching history for:", email);
     console.log("[History] Current message ID:", currentMessageId);
 
-    // Fetch sent emails (from Sent Items folder)
+    // Fetch sent emails using $search (more reliable than complex filters)
     const sentResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages?$filter=toRecipients/any(a:a/emailAddress/address eq '${email}')&$select=subject,body,sentDateTime&$orderby=sentDateTime desc&$top=5`,
+      `https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages?$search="to:${email}"&$select=subject,body,sentDateTime&$orderby=sentDateTime desc&$top=5`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -31,9 +31,9 @@ async function fetchConversationHistory(
       }
     );
 
-    // Fetch received emails from this address (we'll filter out current message in code)
+    // Fetch received emails using $search
     const receivedResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/me/messages?$filter=from/emailAddress/address eq '${email}'&$select=subject,body,receivedDateTime,from&$orderby=receivedDateTime desc&$top=10`,
+      `https://graph.microsoft.com/v1.0/me/messages?$search="from:${email}"&$select=subject,body,receivedDateTime,from&$orderby=receivedDateTime desc&$top=10`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
