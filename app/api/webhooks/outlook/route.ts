@@ -28,8 +28,9 @@ async function fetchConversationHistory(
     console.log("[Webhook-History] Current message ID:", currentMessageId);
 
     // Fetch sent emails using search (more reliable than complex filters)
+    // Note: $search doesn't support $orderby - results are sorted by relevance
     const sentResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages?$search="to:${email}"&$select=subject,body,sentDateTime,toRecipients&$orderby=sentDateTime desc&$top=10`,
+      `https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages?$search="to:${email}"&$select=subject,body,sentDateTime,toRecipients&$top=10`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -39,7 +40,7 @@ async function fetchConversationHistory(
 
     // Fetch received emails - use search instead of filter
     const receivedResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/me/messages?$search="from:${email}"&$select=subject,body,receivedDateTime,from,id&$orderby=receivedDateTime desc&$top=10`,
+      `https://graph.microsoft.com/v1.0/me/messages?$search="from:${email}"&$select=subject,body,receivedDateTime,from,id&$top=10`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
