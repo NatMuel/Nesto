@@ -1,5 +1,11 @@
 {
   "buildCommand": "next build",
   "devCommand": "next dev",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "crons": [
+    {
+      "path": "/api/cron/renew-subscriptions",
+      "schedule": "0 */12 * * *"
+    }
+  ]
 }

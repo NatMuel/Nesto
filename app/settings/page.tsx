@@ -9,6 +9,7 @@ import { Label } from "@/types/label";
 import LabelForm from "@/components/LabelForm";
 import LabelCard from "@/components/LabelCard";
 import EmailTestSection from "@/components/EmailTestSection";
+import AutoClassifySection from "@/components/AutoClassifySection";
 
 export default function Settings() {
   const router = useRouter();
@@ -511,6 +512,8 @@ export default function Settings() {
           saving={saving}
         />
       )}
+
+      <AutoClassifySection userId={user?.id} hasLabels={labels.length > 0} />
 
       <EmailTestSection
         emails={latestEmails}
