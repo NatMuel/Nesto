@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import AuthButton from "@/components/AuthButton";
-import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 function HomeContent() {
   const searchParams = useSearchParams();
@@ -31,6 +32,34 @@ function HomeContent() {
 }
 
 export default function Home() {
+  const router = useRouter();
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session) {
+          router.push("/settings");
+        } else {
+          setIsChecking(false);
+        }
+      } catch (error) {
+        console.error("Error checking auth:", error);
+        setIsChecking(false);
+      }
+    };
+
+    checkAuth();
+  }, [router]);
+
+  if (isChecking) {
+    return null; // or a loading spinner
+  }
+
   return (
     <div
       className="container"
