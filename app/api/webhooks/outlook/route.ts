@@ -1,65 +1,135 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Use service role for webhooks (no user session available)
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+export const dynamic = "force-dynamic";
+
+// Handle webhook validation (Microsoft Graph sends this on subscription creation)
 export async function POST(request: NextRequest) {
   try {
-    // Get Microsoft access token from Authorization header
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const url = new URL(request.url);
+    const validationToken = url.searchParams.get("validationToken");
+
+    // Step 1: Handle validation request
+    if (validationToken) {
+      return new NextResponse(validationToken, {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
     }
 
-    const microsoftAccessToken = authHeader.substring(7);
+    // Step 2: Handle notification
+    const body = await request.json();
+    const notifications = body.value || [];
 
-    const requestBody = await request.json();
-    const { messageId, subject, body: bodyContent, from } = requestBody;
+    console.log(`Received ${notifications.length} notifications`);
 
-    // Get user from Supabase (for prompt and labels)
-    const supabase = createRouteHandlerClient({ cookies });
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    // Process each notification
+    for (const notification of notifications) {
+      const { subscriptionId, resource, resourceData } = notification;
 
-    if (!session) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
+      // Get user by subscription_id (using admin client since no user session)
+      const { data: settings, error: settingsError } = await supabaseAdmin
+        .from("user_settings")
+        .select("*")
+        .eq("subscription_id", subscriptionId)
+        .single();
 
-    // Get user settings and labels
-    const { data: settings } = await supabase
-      .from("user_settings")
-      .select("general_prompt")
-      .eq("user_id", session.user.id)
-      .single();
+      if (settingsError || !settings) {
+        console.log(
+          `No user found for subscription ${subscriptionId}`,
+          settingsError
+        );
+        continue;
+      }
 
-    const { data: labels } = await supabase
-      .from("labels")
-      .select("*")
-      .eq("user_id", session.user.id)
-      .order("display_order", { ascending: true });
+      console.log(`Processing notification for user ${settings.user_id}`);
 
-    if (!labels || labels.length === 0) {
-      return NextResponse.json(
-        { error: "No labels configured. Please create labels in settings." },
-        { status: 400 }
+      // Get message details
+      const messageId = resourceData?.id;
+      if (!messageId) {
+        console.log("No message ID in notification");
+        continue;
+      }
+
+      // Fetch full email details
+      const emailResponse = await fetch(
+        `https://graph.microsoft.com/v1.0/me/messages/${messageId}?$select=id,subject,from,body,bodyPreview,categories`,
+        {
+          headers: {
+            Authorization: `Bearer ${settings.microsoft_access_token}`,
+          },
+        }
+      );
+
+      if (!emailResponse.ok) {
+        console.error("Failed to fetch email details");
+        continue;
+      }
+
+      const email = await emailResponse.json();
+
+      // Skip if already categorized
+      if (email.categories && email.categories.length > 0) {
+        console.log(`Email ${messageId} already categorized, skipping`);
+        continue;
+      }
+
+      // Get user's labels
+      const { data: labels } = await supabaseAdmin
+        .from("labels")
+        .select("*")
+        .eq("user_id", settings.user_id)
+        .order("display_order", { ascending: true });
+
+      if (!labels || labels.length === 0) {
+        console.log("No labels configured for user");
+        continue;
+      }
+
+      // Classify the email
+      await classifyEmail(
+        email,
+        labels,
+        settings.general_prompt,
+        settings.microsoft_access_token
       );
     }
 
-    const generalPrompt =
-      settings?.general_prompt ||
-      "Du bist Assistenz einer Hausverwaltung. Analysiere eingehende E-Mails basierend auf den verfügbaren Kategorien und erstelle professionelle Antwortentwürfe auf Deutsch im 'Sie'-Ton.";
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    console.error("Webhook error:", error);
+    return NextResponse.json(
+      { error: "Webhook processing failed", details: error.message },
+      { status: 500 }
+    );
+  }
+}
 
-    // Build classification prompt with dynamic labels
+async function classifyEmail(
+  email: any,
+  labels: any[],
+  generalPrompt: string,
+  accessToken: string
+) {
+  try {
+    const { id: messageId, subject, body, bodyPreview, from } = email;
+    const bodyContent = body?.content || bodyPreview;
+
+    // Build classification prompt
     const labelDescriptions = labels
       .map((label) => `- **${label.name}**: ${label.description}`)
       .join("\n");
-
-    const labelNames = labels.map((label) => label.name);
 
     const classificationSystemPrompt = `${generalPrompt}
 
@@ -82,7 +152,7 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
         },
         {
           role: "user",
-          content: `Betreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}`,
+          content: `Betreff: ${subject}\nVon: ${from?.emailAddress?.address}\n\nInhalt:\n${bodyContent}`,
         },
       ],
       response_format: { type: "json_object" },
@@ -101,24 +171,21 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
     );
 
     if (!selectedLabel) {
-      return NextResponse.json(
-        { error: `Unknown label: ${selectedLabelName}` },
-        { status: 400 }
-      );
+      console.error(`Unknown label: ${selectedLabelName}`);
+      return;
     }
 
     // Ensure category exists in Outlook
     await ensureCategoryExists(
-      microsoftAccessToken,
+      accessToken,
       selectedLabel.name,
       selectedLabel.color
     );
 
     // Apply category
-    await applyCategory(microsoftAccessToken, messageId, selectedLabel.name);
+    await applyCategory(accessToken, messageId, selectedLabel.name);
 
     // Create draft if needed
-    let draftCreated = false;
     if (shouldCreateDraft && selectedLabel.draft_prompt) {
       const draftCompletion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
@@ -129,7 +196,7 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
           },
           {
             role: "user",
-            content: `Erstelle einen Antwortentwurf für diese E-Mail:\n\nBetreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}`,
+            content: `Erstelle einen Antwortentwurf für diese E-Mail:\n\nBetreff: ${subject}\nVon: ${from?.emailAddress?.address}\n\nInhalt:\n${bodyContent}`,
           },
         ],
         temperature: 0.3,
@@ -137,29 +204,21 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
 
       let draftReply = draftCompletion.choices[0].message.content || "";
 
-      // Clean up any markdown formatting or classification text that might still appear
+      // Clean up any markdown formatting or classification text
       draftReply = draftReply
         .replace(/\*\*Klassifizierung:\*\*.*?\n/g, "")
         .replace(/\*\*Antwortentwurf:\*\*.*?\n/g, "")
         .replace(/^Betreff:.*?\n/gm, "")
         .trim();
 
-      await createReplyDraft(microsoftAccessToken, messageId, draftReply);
-      draftCreated = true;
+      await createReplyDraft(accessToken, messageId, draftReply);
     }
 
-    return NextResponse.json({
-      success: true,
-      category: selectedLabel.name,
-      label: selectedLabel.name,
-      draftCreated,
-    });
-  } catch (error: any) {
-    console.error("Classification error:", error);
-    return NextResponse.json(
-      { error: "Classification failed", details: error.message },
-      { status: 500 }
+    console.log(
+      `Successfully classified email ${messageId} as ${selectedLabel.name}`
     );
+  } catch (error) {
+    console.error("Error classifying email:", error);
   }
 }
 
@@ -226,7 +285,6 @@ async function createReplyDraft(
   messageId: string,
   replyText: string
 ): Promise<void> {
-  // First create the reply draft
   const createResponse = await fetch(
     `https://graph.microsoft.com/v1.0/me/messages/${messageId}/createReply`,
     {
@@ -244,7 +302,6 @@ async function createReplyDraft(
 
   const draft = await createResponse.json();
 
-  // Update the draft with plain text content (preserves line breaks)
   await fetch(`https://graph.microsoft.com/v1.0/me/messages/${draft.id}`, {
     method: "PATCH",
     headers: {
