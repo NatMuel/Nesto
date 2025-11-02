@@ -125,17 +125,25 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
         messages: [
           {
             role: "system",
-            content: `${generalPrompt}\n\n${selectedLabel.draft_prompt}`,
+            content: `${generalPrompt}\n\n${selectedLabel.draft_prompt}\n\nWICHTIG: Gebe NUR den E-Mail-Text zurück, OHNE Klassifizierung, Betreff oder zusätzliche Formatierung. Keine Markdown-Formatierung verwenden. Nur der reine Text der E-Mail-Antwort.`,
           },
           {
             role: "user",
-            content: `Betreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}`,
+            content: `Erstelle einen Antwortentwurf für diese E-Mail:\n\nBetreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}`,
           },
         ],
         temperature: 0.3,
       });
 
-      const draftReply = draftCompletion.choices[0].message.content || "";
+      let draftReply = draftCompletion.choices[0].message.content || "";
+
+      // Clean up any markdown formatting or classification text that might still appear
+      draftReply = draftReply
+        .replace(/\*\*Klassifizierung:\*\*.*?\n/g, "")
+        .replace(/\*\*Antwortentwurf:\*\*.*?\n/g, "")
+        .replace(/^Betreff:.*?\n/gm, "")
+        .trim();
+
       await createReplyDraft(microsoftAccessToken, messageId, draftReply);
       draftCreated = true;
     }
@@ -218,7 +226,8 @@ async function createReplyDraft(
   messageId: string,
   replyText: string
 ): Promise<void> {
-  await fetch(
+  // First create the reply draft
+  const createResponse = await fetch(
     `https://graph.microsoft.com/v1.0/me/messages/${messageId}/createReply`,
     {
       method: "POST",
@@ -226,9 +235,27 @@ async function createReplyDraft(
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        comment: replyText,
-      }),
     }
   );
+
+  if (!createResponse.ok) {
+    throw new Error("Failed to create reply draft");
+  }
+
+  const draft = await createResponse.json();
+
+  // Update the draft with plain text content (preserves line breaks)
+  await fetch(`https://graph.microsoft.com/v1.0/me/messages/${draft.id}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      body: {
+        contentType: "Text",
+        content: replyText,
+      },
+    }),
+  });
 }

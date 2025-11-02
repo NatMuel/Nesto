@@ -54,6 +54,9 @@ export default function Settings() {
   const [isFirstTime, setIsFirstTime] = useState(false);
   const [editingLabel, setEditingLabel] = useState<Label | null>(null);
   const [showLabelForm, setShowLabelForm] = useState(false);
+  const [latestEmails, setLatestEmails] = useState<any[]>([]);
+  const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  const [loadingEmails, setLoadingEmails] = useState(false);
   const [message, setMessage] = useState<{
     type: "success" | "error";
     text: string;
@@ -275,12 +278,11 @@ export default function Settings() {
     }
   };
 
-  const handleTest = async () => {
-    setTesting(true);
+  const handleLoadEmails = async () => {
+    setLoadingEmails(true);
     setMessage(null);
 
     try {
-      // Get the access token from the session
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.provider_token;
 
@@ -290,9 +292,9 @@ export default function Settings() {
         );
       }
 
-      // Call Microsoft Graph API directly
+      // Call Microsoft Graph API to get latest emails
       const response = await fetch(
-        "https://graph.microsoft.com/v1.0/me/messages?$top=5&$select=id,subject,from,receivedDateTime,bodyPreview",
+        "https://graph.microsoft.com/v1.0/me/messages?$top=10&$select=id,subject,from,receivedDateTime,bodyPreview,categories",
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -302,27 +304,45 @@ export default function Settings() {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error?.message || "Microsoft Graph API Fehler");
+        throw new Error(
+          error.error?.message || "Fehler beim Laden der E-Mails"
+        );
       }
 
       const data = await response.json();
+      setLatestEmails(data.value || []);
 
-      setMessage({
-        type: "success",
-        text: `Verbindung erfolgreich! Gefundene E-Mails: ${data.value.length}`,
-      });
+      if (data.value && data.value.length > 0) {
+        setMessage({
+          type: "success",
+          text: `${data.value.length} E-Mails geladen!`,
+        });
+      } else {
+        setMessage({
+          type: "error",
+          text: "Keine E-Mails gefunden.",
+        });
+      }
     } catch (error: any) {
-      console.error("Test error:", error);
+      console.error("Load emails error:", error);
       setMessage({
         type: "error",
-        text: `Testfehler: ${error.message}`,
+        text: `Fehler: ${error.message}`,
       });
     } finally {
-      setTesting(false);
+      setLoadingEmails(false);
     }
   };
 
-  const handleClassifyLatest = async () => {
+  const handleClassifySelected = async () => {
+    if (!selectedEmailId) {
+      setMessage({
+        type: "error",
+        text: "Bitte wählen Sie zuerst eine E-Mail aus.",
+      });
+      return;
+    }
+
     setTesting(true);
     setMessage(null);
 
@@ -338,9 +358,9 @@ export default function Settings() {
         throw new Error("Bitte erstellen Sie zuerst mindestens einen Label.");
       }
 
-      // Get the latest email
+      // Get the selected email with full body
       const response = await fetch(
-        "https://graph.microsoft.com/v1.0/me/messages?$top=1&$select=id,subject,from,body,bodyPreview,categories",
+        `https://graph.microsoft.com/v1.0/me/messages/${selectedEmailId}?$select=id,subject,from,body,bodyPreview,categories`,
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -352,12 +372,7 @@ export default function Settings() {
         throw new Error("Fehler beim Abrufen der E-Mail");
       }
 
-      const data = await response.json();
-      if (!data.value || data.value.length === 0) {
-        throw new Error("Keine E-Mails gefunden");
-      }
-
-      const email = data.value[0];
+      const email = await response.json();
 
       // Call classification API with access token
       const classifyResponse = await fetch("/api/classify-email", {
@@ -385,8 +400,11 @@ export default function Settings() {
         type: "success",
         text: `E-Mail klassifiziert als "${result.label}"! ${
           result.draftCreated ? "Antwortentwurf erstellt." : ""
-        } Aktualisieren Sie Outlook.`,
+        }`,
       });
+
+      // Reload emails to show updated categories
+      await handleLoadEmails();
     } catch (error: any) {
       console.error("Classify error:", error);
       setMessage({
@@ -502,12 +520,12 @@ export default function Settings() {
             }}
             className="button"
           >
-            + Neuer Label
+            + Neues Label
           </button>
         </div>
 
         <p style={{ color: "#666", marginBottom: "1.5rem" }}>
-          Labels definieren, wie E-Mails klassifiziert werden. Jeder Label hat
+          Labels definieren, wie E-Mails klassifiziert werden. Jedes Label hat
           eine Beschreibung für die Klassifizierung und einen Draft-Prompt für
           die Antworterstellung.
         </p>
@@ -602,42 +620,138 @@ export default function Settings() {
       )}
 
       <div className="card">
-        <h2>📊 Status & Test</h2>
+        <h2>✉️ E-Mails testen</h2>
 
-        <div style={{ marginBottom: "1rem" }}>
-          <strong>Verbindung:</strong>{" "}
-          <span style={{ color: "#2e7d32" }}>✓ Aktiv</span>
-        </div>
-
-        <button
-          onClick={handleTest}
-          disabled={testing}
-          className="button button-secondary"
-          style={{ marginBottom: "1rem" }}
-        >
-          {testing ? "Teste..." : "🧪 Verbindung testen"}
-        </button>
+        <p style={{ color: "#666", marginBottom: "1rem" }}>
+          Laden Sie Ihre neuesten E-Mails und testen Sie die Klassifizierung mit
+          einem Ihrer Labels.
+        </p>
 
         <button
-          onClick={handleClassifyLatest}
-          disabled={testing || labels.length === 0}
+          onClick={handleLoadEmails}
+          disabled={loadingEmails}
           className="button"
           style={{ marginBottom: "1rem" }}
         >
-          {testing ? "Klassifiziere..." : "✨ Neueste E-Mail klassifizieren"}
+          {loadingEmails ? "Lade..." : "📥 Neueste E-Mails laden"}
         </button>
 
-        <div className="info">
-          <strong>Wie es funktioniert:</strong>
-          <ul style={{ paddingLeft: "1.5rem", marginTop: "0.5rem" }}>
-            <li>Neue E-Mails werden automatisch verarbeitet</li>
-            <li>Labels werden als Kategorien in Outlook angewendet</li>
-            <li>
-              Antwortentwürfe werden basierend auf dem Label-Draft-Prompt
-              erstellt
-            </li>
-          </ul>
-        </div>
+        {latestEmails.length > 0 && (
+          <>
+            <div
+              style={{
+                maxHeight: "400px",
+                overflowY: "auto",
+                border: "1px solid #ddd",
+                borderRadius: "8px",
+                marginBottom: "1rem",
+              }}
+            >
+              {latestEmails.map((email) => (
+                <div
+                  key={email.id}
+                  onClick={() => setSelectedEmailId(email.id)}
+                  style={{
+                    padding: "1rem",
+                    borderBottom: "1px solid #eee",
+                    cursor: "pointer",
+                    backgroundColor:
+                      selectedEmailId === email.id ? "#e3f2fd" : "transparent",
+                    transition: "background-color 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (selectedEmailId !== email.id) {
+                      e.currentTarget.style.backgroundColor = "#f5f5f5";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (selectedEmailId !== email.id) {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      marginBottom: "0.5rem",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="email-selection"
+                      checked={selectedEmailId === email.id}
+                      onChange={() => setSelectedEmailId(email.id)}
+                      style={{ marginRight: "0.75rem" }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div
+                        style={{
+                          fontWeight: "600",
+                          marginBottom: "0.25rem",
+                          fontSize: "0.95rem",
+                        }}
+                      >
+                        {email.subject || "(Kein Betreff)"}
+                      </div>
+                      <div style={{ fontSize: "0.85rem", color: "#666" }}>
+                        Von: {email.from?.emailAddress?.address || "Unbekannt"}
+                      </div>
+                    </div>
+                    {email.categories && email.categories.length > 0 && (
+                      <div style={{ marginLeft: "0.5rem" }}>
+                        {email.categories.map((cat: string, idx: number) => (
+                          <span
+                            key={idx}
+                            style={{
+                              display: "inline-block",
+                              padding: "0.2rem 0.5rem",
+                              backgroundColor: "#e8f5e9",
+                              color: "#2e7d32",
+                              borderRadius: "4px",
+                              fontSize: "0.75rem",
+                              marginLeft: "0.25rem",
+                            }}
+                          >
+                            {cat}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "0.85rem",
+                      color: "#888",
+                      marginLeft: "1.5rem",
+                    }}
+                  >
+                    {email.bodyPreview?.substring(0, 100)}
+                    {email.bodyPreview?.length > 100 ? "..." : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={handleClassifySelected}
+              disabled={testing || !selectedEmailId || labels.length === 0}
+              className="button"
+              style={{ marginBottom: "1rem" }}
+            >
+              {testing
+                ? "Klassifiziere..."
+                : "✨ Ausgewählte E-Mail klassifizieren"}
+            </button>
+          </>
+        )}
+
+        {labels.length === 0 && (
+          <div className="info">
+            <strong>Hinweis:</strong> Erstellen Sie zuerst mindestens einen
+            Label, um E-Mails klassifizieren zu können.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -2,21 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
+// Force dynamic rendering
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (authError || !user) {
+      console.error("Auth error in GET /api/labels:", authError);
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const { data: labels, error } = await supabase
       .from("labels")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .order("display_order", { ascending: true });
 
     if (error) {
@@ -35,12 +41,15 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (authError || !user) {
+      console.error("Auth error in POST /api/labels:", authError);
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
@@ -58,7 +67,7 @@ export async function POST(request: NextRequest) {
     const { data: maxOrderData } = await supabase
       .from("labels")
       .select("display_order")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .order("display_order", { ascending: false })
       .limit(1)
       .single();
@@ -68,7 +77,7 @@ export async function POST(request: NextRequest) {
     const { data: label, error } = await supabase
       .from("labels")
       .insert({
-        user_id: session.user.id,
+        user_id: user.id,
         name,
         description,
         draft_prompt,
@@ -94,12 +103,15 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (authError || !user) {
+      console.error("Auth error in PUT /api/labels:", authError);
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
@@ -124,7 +136,7 @@ export async function PUT(request: NextRequest) {
       .from("labels")
       .update(updateData)
       .eq("id", id)
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .select()
       .single();
 
@@ -144,12 +156,15 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (authError || !user) {
+      console.error("Auth error in DELETE /api/labels:", authError);
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
@@ -167,7 +182,7 @@ export async function DELETE(request: NextRequest) {
       .from("labels")
       .delete()
       .eq("id", id)
-      .eq("user_id", session.user.id);
+      .eq("user_id", user.id);
 
     if (error) {
       throw error;
