@@ -21,9 +21,9 @@ async function fetchConversationHistory(
     console.log("[History] Fetching history for:", email);
     console.log("[History] Current message ID:", currentMessageId);
 
-    // Fetch sent emails to this address
+    // Fetch sent emails (from Sent Items folder)
     const sentResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/me/messages?$filter=toRecipients/any(r:r/emailAddress/address eq '${email}')&$select=subject,body,sentDateTime,from,toRecipients&$orderby=sentDateTime desc&$top=5`,
+      `https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages?$filter=toRecipients/any(a:a/emailAddress/address eq '${email}')&$select=subject,body,sentDateTime&$orderby=sentDateTime desc&$top=5`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -31,9 +31,9 @@ async function fetchConversationHistory(
       }
     );
 
-    // Fetch received emails from this address (excluding current one)
+    // Fetch received emails from this address (we'll filter out current message in code)
     const receivedResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/me/messages?$filter=from/emailAddress/address eq '${email}' and id ne '${currentMessageId}'&$select=subject,body,receivedDateTime,from&$orderby=receivedDateTime desc&$top=5`,
+      `https://graph.microsoft.com/v1.0/me/messages?$filter=from/emailAddress/address eq '${email}'&$select=subject,body,receivedDateTime,from&$orderby=receivedDateTime desc&$top=10`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -64,8 +64,18 @@ async function fetchConversationHistory(
 
     console.log("[History] Sent emails found:", sentEmails.value?.length || 0);
     console.log(
-      "[History] Received emails found:",
+      "[History] Received emails found (before filter):",
       receivedEmails.value?.length || 0
+    );
+
+    // Filter out the current message from received emails
+    const filteredReceivedEmails = (receivedEmails.value || []).filter(
+      (email: any) => email.id !== currentMessageId
+    );
+
+    console.log(
+      "[History] Received emails found (after filter):",
+      filteredReceivedEmails.length
     );
 
     // Combine and sort by date
@@ -75,7 +85,7 @@ async function fetchConversationHistory(
         type: "sent",
         date: new Date(email.sentDateTime),
       })),
-      ...(receivedEmails.value || []).map((email: any) => ({
+      ...filteredReceivedEmails.map((email: any) => ({
         ...email,
         type: "received",
         date: new Date(email.receivedDateTime),
