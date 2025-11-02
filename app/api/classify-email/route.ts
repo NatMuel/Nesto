@@ -20,26 +20,57 @@ export async function POST(request: NextRequest) {
     const requestBody = await request.json();
     const { messageId, subject, body: bodyContent, from } = requestBody;
 
-    // Get user from Supabase (for prompt)
+    // Get user from Supabase (for prompt and labels)
     const supabase = createRouteHandlerClient({ cookies });
     const {
       data: { session },
     } = await supabase.auth.getSession();
 
-    let classificationPrompt =
-      "Du bist Assistenz einer Hausverwaltung. Klassifiziere neue E-Mails als Needs reply / Waiting / FYI. Falls Needs reply, verfasse einen höflichen kurzen Antwortentwurf auf Deutsch im 'Sie'-Ton mit fehlenden Infos und nächsten Schritten.";
-
-    if (session) {
-      const { data: settings } = await supabase
-        .from("user_settings")
-        .select("classification_prompt")
-        .eq("user_id", session.user.id)
-        .single();
-
-      if (settings?.classification_prompt) {
-        classificationPrompt = settings.classification_prompt;
-      }
+    if (!session) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
+
+    // Get user settings and labels
+    const { data: settings } = await supabase
+      .from("user_settings")
+      .select("general_prompt")
+      .eq("user_id", session.user.id)
+      .single();
+
+    const { data: labels } = await supabase
+      .from("labels")
+      .select("*")
+      .eq("user_id", session.user.id)
+      .order("display_order", { ascending: true });
+
+    if (!labels || labels.length === 0) {
+      return NextResponse.json(
+        { error: "No labels configured. Please create labels in settings." },
+        { status: 400 }
+      );
+    }
+
+    const generalPrompt =
+      settings?.general_prompt ||
+      "Du bist Assistenz einer Hausverwaltung. Analysiere eingehende E-Mails basierend auf den verfügbaren Kategorien und erstelle professionelle Antwortentwürfe auf Deutsch im 'Sie'-Ton.";
+
+    // Build classification prompt with dynamic labels
+    const labelDescriptions = labels
+      .map((label) => `- **${label.name}**: ${label.description}`)
+      .join("\n");
+
+    const labelNames = labels.map((label) => label.name);
+
+    const classificationSystemPrompt = `${generalPrompt}
+
+Verfügbare Kategorien:
+${labelDescriptions}
+
+Wähle die passendste Kategorie für die E-Mail aus.
+
+Antworte im JSON-Format mit: {"label": "gewählter Label-Name", "create_draft": true/false}
+
+Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
 
     // Classify with OpenAI
     const completion = await openai.chat.completions.create({
@@ -47,7 +78,7 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: "system",
-          content: `${classificationPrompt}\n\nAntworte im JSON-Format mit: {"category": "Needs reply" oder "Waiting" oder "FYI", "draft": "Antwortentwurf falls Needs reply"}`,
+          content: classificationSystemPrompt,
         },
         {
           role: "user",
@@ -58,28 +89,61 @@ export async function POST(request: NextRequest) {
       temperature: 0.3,
     });
 
-    const result = JSON.parse(completion.choices[0].message.content || "{}");
-    const category = mapCategory(result.classification || result.category);
-    const needsReply = category === "To respond";
-    const draftReply = result.draft || result.reply;
+    const classificationResult = JSON.parse(
+      completion.choices[0].message.content || "{}"
+    );
+    const selectedLabelName = classificationResult.label;
+    const shouldCreateDraft = classificationResult.create_draft === true;
+
+    // Find the selected label
+    const selectedLabel = labels.find(
+      (label) => label.name.toLowerCase() === selectedLabelName?.toLowerCase()
+    );
+
+    if (!selectedLabel) {
+      return NextResponse.json(
+        { error: `Unknown label: ${selectedLabelName}` },
+        { status: 400 }
+      );
+    }
 
     // Ensure category exists in Outlook
-    await ensureCategoryExists(microsoftAccessToken, category);
+    await ensureCategoryExists(
+      microsoftAccessToken,
+      selectedLabel.name,
+      selectedLabel.color
+    );
 
     // Apply category
-    await applyCategory(microsoftAccessToken, messageId, category);
+    await applyCategory(microsoftAccessToken, messageId, selectedLabel.name);
 
     // Create draft if needed
     let draftCreated = false;
-    if (needsReply && draftReply) {
+    if (shouldCreateDraft && selectedLabel.draft_prompt) {
+      const draftCompletion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `${generalPrompt}\n\n${selectedLabel.draft_prompt}`,
+          },
+          {
+            role: "user",
+            content: `Betreff: ${subject}\nVon: ${from}\n\nInhalt:\n${bodyContent}`,
+          },
+        ],
+        temperature: 0.3,
+      });
+
+      const draftReply = draftCompletion.choices[0].message.content || "";
       await createReplyDraft(microsoftAccessToken, messageId, draftReply);
       draftCreated = true;
     }
 
     return NextResponse.json({
       success: true,
-      category,
-      needsReply,
+      category: selectedLabel.name,
+      label: selectedLabel.name,
       draftCreated,
     });
   } catch (error: any) {
@@ -91,20 +155,10 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function mapCategory(classification: string): string {
-  const lower = classification.toLowerCase();
-  if (lower.includes("needs reply") || lower.includes("respond")) {
-    return "To respond";
-  }
-  if (lower.includes("waiting")) {
-    return "Waiting";
-  }
-  return "FYI";
-}
-
 async function ensureCategoryExists(
   accessToken: string,
-  categoryName: string
+  categoryName: string,
+  color: string = "preset2"
 ): Promise<void> {
   try {
     const response = await fetch(
@@ -122,12 +176,6 @@ async function ensureCategoryExists(
     );
 
     if (!exists) {
-      const colorMap: Record<string, string> = {
-        "To respond": "preset0",
-        Waiting: "preset4",
-        FYI: "preset2",
-      };
-
       await fetch(
         "https://graph.microsoft.com/v1.0/me/outlook/masterCategories",
         {
@@ -138,7 +186,7 @@ async function ensureCategoryExists(
           },
           body: JSON.stringify({
             displayName: categoryName,
-            color: colorMap[categoryName] || "preset2",
+            color: color,
           }),
         }
       );
