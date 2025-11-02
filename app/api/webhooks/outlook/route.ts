@@ -54,7 +54,9 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      console.log(`[Webhook] Processing notification for user ${settings.user_id}`);
+      console.log(
+        `[Webhook] Processing notification for user ${settings.user_id}`
+      );
 
       // Get message details
       const messageId = resourceData?.id;
@@ -88,7 +90,9 @@ export async function POST(request: NextRequest) {
 
       // Skip if already categorized
       if (email.categories && email.categories.length > 0) {
-        console.log(`[Webhook] Email ${messageId} already categorized, skipping`);
+        console.log(
+          `[Webhook] Email ${messageId} already categorized, skipping`
+        );
         continue;
       }
 

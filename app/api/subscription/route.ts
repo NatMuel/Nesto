@@ -61,9 +61,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Create new subscription
-    const webhookUrl = `${
-      process.env.NEXT_PUBLIC_APP_URL || request.headers.get("origin")
-    }/api/webhooks/outlook`;
+    const baseUrl = (
+      process.env.NEXT_PUBLIC_APP_URL ||
+      request.headers.get("origin") ||
+      ""
+    ).replace(/\/$/, ""); // Remove trailing slash if present
+    const webhookUrl = `${baseUrl}/api/webhooks/outlook`;
 
     console.log("[Subscription] Creating subscription:", {
       webhookUrl,
