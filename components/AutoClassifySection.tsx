@@ -210,7 +210,7 @@ export default function AutoClassifySection({
           </li>
           <li>
             ✨ <strong>Automatische Verlängerung:</strong> Das Abonnement wird
-            alle 12 Stunden automatisch geprüft und bei Bedarf verlängert
+            täglich automatisch geprüft und bei Bedarf verlängert
           </li>
         </ul>
       </div>

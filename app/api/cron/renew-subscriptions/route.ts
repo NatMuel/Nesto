@@ -19,9 +19,10 @@ export async function GET(request: NextRequest) {
 
     console.log("Starting subscription renewal check...");
 
-    // Find subscriptions that expire within the next 24 hours
+    // Find subscriptions that expire within the next 48 hours
+    // (Hobby plan: cron runs once per day, so we need more buffer time)
     const expiryThreshold = new Date();
-    expiryThreshold.setHours(expiryThreshold.getHours() + 24);
+    expiryThreshold.setHours(expiryThreshold.getHours() + 48);
 
     const { data: expiringSubscriptions, error: fetchError } =
       await supabaseAdmin

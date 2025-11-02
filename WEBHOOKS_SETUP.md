@@ -182,12 +182,22 @@ POST /api/webhooks/outlook
 
 The system now automatically renews subscriptions before they expire!
 
-- **Cron Schedule**: Runs every 12 hours (`0 */12 * * *`)
-- **Renewal Window**: Subscriptions expiring within 24 hours are renewed
+- **Cron Schedule**: Runs daily at 2 AM (`0 2 * * *`)
+- **Renewal Window**: Subscriptions expiring within 48 hours are renewed
 - **Fallback**: If renewal fails, creates a new subscription
 - **No manual intervention needed**: Set it and forget it!
 
 The cron job checks all active subscriptions and extends their expiration by 72 hours (maximum allowed by Microsoft).
+
+### Vercel Hobby Plan Note
+
+The configuration is optimized for Vercel Hobby plan which has these constraints:
+
+- ⚠️ Maximum **2 cron jobs per account**
+- ⚠️ Can only run **once per day**
+- ⚠️ **Imprecise timing** (may run anytime within the scheduled hour)
+
+For more frequent renewals or guaranteed timing, upgrade to Vercel Pro plan.
 
 ## Future Improvements
 
