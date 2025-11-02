@@ -16,14 +16,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "18"
+          node-version: "20"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Generate Prisma Client
-        run: npx prisma generate
 
       - name: Run ESLint
         run: npm run lint
@@ -40,23 +37,21 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "18"
+          node-version: "20"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Prisma Client
-        run: npx prisma generate
-
       - name: Build Next.js app
         run: npm run build
         env:
-          DATABASE_URL: postgresql://test:test@localhost:5432/test
-          MICROSOFT_CLIENT_ID: test
-          MICROSOFT_CLIENT_SECRET: test
-          MICROSOFT_TENANT_ID: common
-          NEXTAUTH_URL: http://localhost:3000
-          NEXTAUTH_SECRET: test-secret-for-ci
-          OPENAI_API_KEY: sk-test
-          WEBHOOK_SECRET: test-webhook-secret
+          # Supabase
+          NEXT_PUBLIC_SUPABASE_URL: https://test.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test
+          SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test
+          # OpenAI
+          OPENAI_API_KEY: sk-test-key-for-ci
+          # App Config
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          CRON_SECRET: test-cron-secret
