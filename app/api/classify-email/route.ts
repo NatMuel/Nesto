@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import OpenAI from "openai";
+import { trackEvent } from "@/lib/posthog";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -252,6 +253,13 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
       draftCreated = true;
     }
 
+    // Track manual classification
+    trackEvent(session.user.id, "manual_email_classified", {
+      label: selectedLabel.name,
+      priority,
+      draft_created: draftCreated,
+    });
+
     return NextResponse.json({
       success: true,
       category: selectedLabel.name,
@@ -261,6 +269,12 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
     });
   } catch (error: any) {
     console.error("Classification error:", error);
+
+    // Track classification error
+    trackEvent("system", "manual_classification_error", {
+      error: error.message,
+    });
+
     return NextResponse.json(
       { error: "Classification failed", details: error.message },
       { status: 500 }

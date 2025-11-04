@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import { refreshAccessTokenIfNeeded } from "@/lib/tokenRefresh";
+import { trackEvent } from "@/lib/posthog";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -174,6 +175,14 @@ export async function POST(request: NextRequest) {
           status: emailResponse.status,
           error: errorText,
         });
+        
+        // Track error
+        trackEvent(settings.user_id, "webhook_fetch_email_error", {
+          status: emailResponse.status,
+          error: errorText.substring(0, 200),
+          message_id: messageId,
+        });
+        
         continue;
       }
 
@@ -338,10 +347,25 @@ Setze "create_draft" auf true, wenn ein Antwortentwurf erstellt werden soll.`;
     console.log(
       `[Webhook] Successfully classified email ${messageId} as ${selectedLabel.name} with priority ${priority}`
     );
+
+    // Track successful classification
+    trackEvent("system", "email_classified", {
+      user_id: accessToken, // Use hashed token as anonymous identifier
+      label: selectedLabel.name,
+      priority,
+      draft_created: shouldCreateDraft,
+      message_id: messageId,
+    });
   } catch (error: any) {
     console.error("[Webhook] Error classifying email:", {
       message: error.message,
       stack: error.stack,
+    });
+
+    // Track classification error
+    trackEvent("system", "email_classification_error", {
+      error: error.message,
+      stack: error.stack?.substring(0, 500),
     });
   }
 }
