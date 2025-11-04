@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { refreshAccessTokenIfNeeded } from "@/lib/tokenRefresh";
 
 // Use service role for cron jobs (bypasses RLS)
 const supabaseAdmin = createClient(
@@ -53,6 +54,14 @@ export async function GET(request: NextRequest) {
     // Renew each subscription
     for (const settings of expiringSubscriptions) {
       try {
+        // Refresh access token if needed
+        const accessToken = await refreshAccessTokenIfNeeded(
+          settings.user_id,
+          settings.microsoft_access_token,
+          settings.microsoft_refresh_token,
+          settings.microsoft_token_expiry
+        );
+
         // Extend the subscription by updating expiration time
         const newExpirationDateTime = new Date();
         newExpirationDateTime.setHours(newExpirationDateTime.getHours() + 72);
@@ -62,7 +71,7 @@ export async function GET(request: NextRequest) {
           {
             method: "PATCH",
             headers: {
-              Authorization: `Bearer ${settings.microsoft_access_token}`,
+              Authorization: `Bearer ${accessToken}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
@@ -129,6 +138,14 @@ export async function GET(request: NextRequest) {
 
 async function createNewSubscription(settings: any) {
   try {
+    // Refresh access token if needed
+    const accessToken = await refreshAccessTokenIfNeeded(
+      settings.user_id,
+      settings.microsoft_access_token,
+      settings.microsoft_refresh_token,
+      settings.microsoft_token_expiry
+    );
+
     const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/outlook`;
 
     const expirationDateTime = new Date();
@@ -147,7 +164,7 @@ async function createNewSubscription(settings: any) {
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${settings.microsoft_access_token}`,
+          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(subscriptionPayload),

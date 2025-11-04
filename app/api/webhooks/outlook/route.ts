@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
+import { refreshAccessTokenIfNeeded } from "@/lib/tokenRefresh";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -149,12 +150,20 @@ export async function POST(request: NextRequest) {
 
       console.log(`[Webhook] Fetching email ${messageId}`);
 
+      // Refresh access token if needed
+      const accessToken = await refreshAccessTokenIfNeeded(
+        settings.user_id,
+        settings.microsoft_access_token,
+        settings.microsoft_refresh_token,
+        settings.microsoft_token_expiry
+      );
+
       // Fetch full email details
       const emailResponse = await fetch(
         `https://graph.microsoft.com/v1.0/me/messages/${messageId}?$select=id,subject,from,body,bodyPreview,categories`,
         {
           headers: {
-            Authorization: `Bearer ${settings.microsoft_access_token}`,
+            Authorization: `Bearer ${accessToken}`,
           },
         }
       );
@@ -193,12 +202,7 @@ export async function POST(request: NextRequest) {
       console.log(`[Webhook] Processing with ${labels.length} labels`);
 
       // Classify the email
-      await classifyEmail(
-        email,
-        labels,
-        settings.general_prompt,
-        settings.microsoft_access_token
-      );
+      await classifyEmail(email, labels, settings.general_prompt, accessToken);
     }
 
     return NextResponse.json({ success: true });

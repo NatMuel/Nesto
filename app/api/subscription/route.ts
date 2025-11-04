@@ -21,10 +21,12 @@ export async function POST(request: NextRequest) {
     // Get fresh access token from current session
     const { data: sessionData } = await supabase.auth.getSession();
     const accessToken = sessionData.session?.provider_token;
+    const refreshToken = sessionData.session?.provider_refresh_token;
 
     console.log("[Subscription] Token check:", {
       hasSession: !!sessionData.session,
       hasToken: !!accessToken,
+      hasRefreshToken: !!refreshToken,
       tokenLength: accessToken?.length,
       userId: user.id,
     });
@@ -129,6 +131,7 @@ export async function POST(request: NextRequest) {
         subscription_id: subscription.id,
         subscription_expiry: subscription.expirationDateTime,
         microsoft_access_token: accessToken, // Save current token for webhook use
+        microsoft_refresh_token: refreshToken, // Save refresh token for token renewal
         microsoft_token_expiry: new Date(
           Date.now() + 3600 * 1000
         ).toISOString(),
